@@ -1,3 +1,5 @@
+#include <DHT.h>
+#include <SPI.h>
 #include <SD.h>
 #include <Wire.h>
 #include "RTClib.h"
@@ -5,19 +7,20 @@
 // A simple data logger for the Arduino analog pins
 
 // how many milliseconds between grabbing data and logging it. 1000 ms is once a second
-#define LOG_INTERVAL  1000 // mills between entries (reduce to take more/faster data)
+#define LOG_INTERVAL 900000 // mills between entries (reduce to take more/faster data)
 
 // how many milliseconds before writing the logged data permanently to disk
 // set it to the LOG_INTERVAL to write each time (safest)
 // set it to 10*LOG_INTERVAL to write all data every 10 datareads, you could lose up to 
 // the last 10 reads if power is lost but it uses less power and is much faster!
-#define SYNC_INTERVAL 1000 // mills between calls to flush() - to write data to the card
+#define SYNC_INTERVAL 900000 // mills between calls to flush() - to write data to the card
 uint32_t syncTime = 0; // time of last sync()
 
-#define ECHO_TO_SERIAL   1 // echo data to serial port
+#define ECHO_TO_SERIAL   0 // echo data to serial port - sættes til 0 når det kører
 #define WAIT_TO_START    0 // Wait for serial input in setup()
+#define USE_DHT_SENSOR   1 // Aflaes også DHT sensor
 
-// the digital pins that connect to the LEDs
+// the digital pins that connect to the LEDs - er det de rigtige?
 #define redLEDpin 2
 #define greenLEDpin 3
 
@@ -28,8 +31,14 @@ uint32_t syncTime = 0; // time of last sync()
 
 #define aref_voltage 3.3         // we tie 3.3V to ARef and measure it with a multimeter!
 #define bandgap_voltage 1.1      // this is not super guaranteed but its not -too- off
+#define DHTPIN 4     // what digital pin we're connected to DHT11 sensor
+#define DHTTYPE DHT11   // DHT 11
 
 RTC_DS1307 RTC; // define the Real Time Clock object
+#if USE_DHT_SENSOR
+  DHT dht(DHTPIN, DHTTYPE); //definer DHT11 (Digital Hygrometer og Temperatur måler - den lyseblå firkant) object
+#endif
+
 
 // for the data logging shield, we use digital pin 10 for the SD cs line
 const int chipSelect = 10;
@@ -102,10 +111,13 @@ void setup(void)
 #endif  //ECHO_TO_SERIAL
   }
   
-
-  logfile.println("millis,stamp,datetime,light,temp,vcc");    
+#if USE_DHT_SENSOR
+  logfile.println("millisekundersidenstart,stamp,datoogtid,dato,tidspunkt,lys,temp1,DHTtemp2,DHTfugtighed,vcc");    
+#else
+  logfile.println("millisekundersidenstart,stamp,datoogtid,dato,tidspunkt,lys,temp1,vcc");
+#endif      
 #if ECHO_TO_SERIAL
-  Serial.println("millis,stamp,datetime,light,temp,vcc");
+  Serial.println("millisekundersidenstart,stamp,datoogtid,dato,tidspunkt,lys,temp1,DHTtemp2,DHTfugtighed,vcc");
 #endif //ECHO_TO_SERIAL
  
   // If you want to set the aref to something other than 5v
@@ -136,11 +148,11 @@ void loop(void)
   logfile.print(now.unixtime()); // seconds since 1/1/1970
   logfile.print(", ");
   logfile.print('"');
-  logfile.print(now.year(), DEC);
+  logfile.print(now.day(), DEC);
   logfile.print("/");
   logfile.print(now.month(), DEC);
-  logfile.print("/");
-  logfile.print(now.day(), DEC);
+  logfile.print("-");
+  logfile.print(now.year(), DEC);
   logfile.print(" ");
   logfile.print(now.hour(), DEC);
   logfile.print(":");
@@ -148,22 +160,34 @@ void loop(void)
   logfile.print(":");
   logfile.print(now.second(), DEC);
   logfile.print('"');
+  logfile.print(", ");
+  logfile.print(now.day(), DEC);
+  logfile.print("/");
+  logfile.print(now.month(), DEC);
+  logfile.print("-");
+  logfile.print(now.year(), DEC);
+  logfile.print(", ");
+  logfile.print(now.hour(), DEC);
+  logfile.print(":");
+  logfile.print(now.minute(), DEC);
+  logfile.print(":");
+  logfile.print(now.second(), DEC);
 #if ECHO_TO_SERIAL
   Serial.print(now.unixtime()); // seconds since 1/1/1970
   Serial.print(", ");
-  Serial.print('"');
-  Serial.print(now.year(), DEC);
+  // Serial.print('"');
+  Serial.print(now.day(), DEC);
   Serial.print("/");
   Serial.print(now.month(), DEC);
-  Serial.print("/");
-  Serial.print(now.day(), DEC);
-  Serial.print(" ");
+  Serial.print("-");
+  Serial.print(now.year(), DEC);
+  Serial.print(", ");
   Serial.print(now.hour(), DEC);
   Serial.print(":");
   Serial.print(now.minute(), DEC);
   Serial.print(":");
   Serial.print(now.second(), DEC);
-  Serial.print('"');
+  // Serial.print('"');
 #endif //ECHO_TO_SERIAL
 
   analogRead(photocellPin);
@@ -177,17 +201,34 @@ void loop(void)
   // converting that reading to voltage, for 3.3v arduino use 3.3, for 5.0, use 5.0
   float voltage = tempReading * aref_voltage / 1024;  
   float temperatureC = (voltage - 0.5) * 100 ;
-  float temperatureF = (temperatureC * 9 / 5) + 32;
-  
+  // float temperatureF = (temperatureC * 9 / 5) + 32;
   logfile.print(", ");    
   logfile.print(photocellReading);
   logfile.print(", ");    
-  logfile.print(temperatureF);
+  logfile.print(temperatureC);
+
+  // OBP DHT11
+  #if USE_DHT_SENSOR
+    float hDHT11 = dht.readHumidity();
+    // Read temperature as Celsius (the default)
+    float tDHT11 = dht.readTemperature();
+    logfile.print(", ");    
+    logfile.print(tDHT11);
+    logfile.print(", ");    
+    logfile.print(hDHT11);
+  #endif
+     
 #if ECHO_TO_SERIAL
   Serial.print(", ");   
   Serial.print(photocellReading);
   Serial.print(", ");    
-  Serial.print(temperatureF);
+  Serial.print(temperatureC);
+  #if USE_DHT_SENSOR
+    Serial.print(", ");    
+    Serial.print(tDHT11);
+    Serial.print(", ");    
+    Serial.print(hDHT11);
+  #endif
 #endif //ECHO_TO_SERIAL
 
   // Log the estimated 'VCC' voltage by measuring the internal 1.1v ref
@@ -221,5 +262,4 @@ void loop(void)
   digitalWrite(redLEDpin, LOW);
   
 }
-
 
